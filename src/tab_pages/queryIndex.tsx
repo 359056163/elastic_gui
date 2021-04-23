@@ -1,5 +1,5 @@
 /* eslint-disable react/prefer-stateless-function */
-import React from 'react';
+import React, { ReactNode } from 'react';
 import { FormInstance } from 'antd/lib/form';
 import {
   Form,
@@ -15,12 +15,21 @@ import {
   Button,
   Collapse,
   Descriptions,
+  Space,
 } from 'antd';
 import { ApiResponse, Client } from '@elastic/elasticsearch';
 import { ColumnsType } from 'antd/es/table';
 import { Search } from '@elastic/elasticsearch/api/requestParams';
 import { observer } from 'mobx-react';
-import { SearchOutlined, AlertOutlined } from '@ant-design/icons';
+import {
+  SearchOutlined,
+  AlertOutlined,
+  SettingOutlined,
+  RadarChartOutlined,
+  CloseCircleOutlined,
+  DeleteOutlined,
+  FormOutlined,
+} from '@ant-design/icons';
 import { ElasticIndexBrief, Health } from '../interfaces';
 
 const { Option } = Select;
@@ -49,6 +58,8 @@ interface IQueryIndexState {
     query: string;
   };
   indexBrief: ElasticIndexBrief | null;
+  selectedRcd?: any;
+  selectedRcdText?: string;
 }
 
 function getBrief(
@@ -86,6 +97,19 @@ function getBrief(
     });
 }
 
+async function getIndexState(client: Client, index: string): Promise<any> {
+  const stateResp = await client.indices.stats({
+    index,
+  });
+  return stateResp.body;
+}
+async function getIndexInfo(client: Client, index: string): Promise<any> {
+  const infoResp = await client.cluster.state({
+    index,
+    metric: 'metadata',
+  });
+  return infoResp.body;
+}
 @observer
 export default class QueryIndex extends React.Component<
   IQueryIndexProps,
@@ -239,11 +263,9 @@ export default class QueryIndex extends React.Component<
   };
 
   onRowClick = (rcd: any) => {
-    const txt = JSON.stringify(rcd, null, 2);
-    Modal.info({
-      title: `数据详细:${rcd.key}`,
-      content: <pre>{txt}</pre>,
-      width: 780,
+    this.setState({
+      selectedRcd: rcd,
+      selectedRcdText: JSON.stringify(rcd, null, 2),
     });
   };
 
@@ -278,6 +300,159 @@ export default class QueryIndex extends React.Component<
     await this.requestData();
   };
 
+  extraContext = (): ReactNode => {
+    const { client, index } = this.props;
+    return (
+      <Space size="small">
+        <RadarChartOutlined
+          title="索引状态"
+          onClick={async (evt: React.MouseEvent) => {
+            evt.stopPropagation();
+            const state = await getIndexState(client, index);
+            Modal.info({
+              title: `索引：${index} 的状态`,
+              content: <pre>{JSON.stringify(state, null, 2)}</pre>,
+              width: '500',
+              closable: true,
+            });
+          }}
+        />
+        <SettingOutlined
+          title="索引信息"
+          onClick={async (evt: React.MouseEvent) => {
+            evt.stopPropagation();
+            const inf = await getIndexInfo(client, index);
+            Modal.info({
+              title: `索引：${index} 的状态`,
+              content: <pre>{JSON.stringify(inf, null, 2)}</pre>,
+              width: '500',
+              closable: true,
+            });
+          }}
+        />
+      </Space>
+    );
+  };
+
+  unselectedRecord = () => {
+    this.setState({
+      selectedRcd: undefined,
+      selectedRcdText: undefined,
+    });
+  };
+
+  deleteSelectedRcd = async () => {
+    const {
+      selectedRcd,
+      searchParam: { selectedType },
+    } = this.state;
+    const { client, index } = this.props;
+    if (selectedRcd && selectedRcd.key && selectedType) {
+      this.setState({
+        dataLoading: true,
+      });
+      const { key } = selectedRcd;
+      const resp = await client.delete({
+        id: key,
+        index,
+        type: selectedType,
+      });
+      if (resp && resp.statusCode === 200 && resp.body.result === 'deleted') {
+        this.setState({
+          dataLoading: false,
+          selectedRcd: undefined,
+          selectedRcdText: undefined,
+        });
+        await this.requestData();
+      } else {
+        this.setState({
+          dataLoading: false,
+        });
+        message.error(
+          `http code: ${resp.statusCode}, err: ${JSON.stringify(resp.body)}`
+        );
+      }
+    }
+  };
+
+  modifyRcd = async () => {
+    const {
+      selectedRcd,
+      selectedRcdText,
+      searchParam: { selectedType },
+    } = this.state;
+    const { client, index } = this.props;
+    if (selectedRcd && selectedRcd.key && selectedType && selectedRcdText) {
+      this.setState({
+        dataLoading: true,
+      });
+      const { key } = selectedRcd;
+      let modifiedRcd = null;
+      try {
+        modifiedRcd = JSON.parse(selectedRcdText);
+      } catch (e) {
+        message.error('不是正确的json格式');
+        return;
+      }
+      try {
+        const resp = await client.update({
+          id: key,
+          index,
+          type: selectedType,
+          body: {
+            doc: modifiedRcd,
+          },
+        });
+        if (resp && resp.statusCode === 200 && resp.body.result === 'updated') {
+          this.setState({
+            dataLoading: false,
+            selectedRcd: undefined,
+            selectedRcdText: undefined,
+          });
+          await this.requestData();
+        } else {
+          this.setState({
+            dataLoading: false,
+          });
+          message.error(
+            `http code: ${resp.statusCode}, err: ${JSON.stringify(resp.body)}`
+          );
+        }
+      } catch (e) {
+        message.error(e.message);
+      }
+    }
+  };
+
+  modalFooter = (): ReactNode => {
+    const { dataLoading } = this.state;
+    return (
+      <Space size="middle">
+        <Button
+          danger
+          type="default"
+          onClick={this.deleteSelectedRcd}
+          loading={dataLoading}
+        >
+          <DeleteOutlined />
+          删除
+        </Button>
+        <Button type="primary" loading={dataLoading} onClick={this.modifyRcd}>
+          <FormOutlined />
+          提交修改
+        </Button>
+        <Button
+          type="default"
+          onClick={this.unselectedRecord}
+          loading={dataLoading}
+        >
+          <CloseCircleOutlined />
+          关闭
+        </Button>
+      </Space>
+    );
+  };
+
   render = () => {
     const {
       data,
@@ -287,6 +462,8 @@ export default class QueryIndex extends React.Component<
       dataLoading,
       searchParam,
       indexBrief,
+      selectedRcd,
+      selectedRcdText,
     } = this.state;
     const { selectedType } = searchParam;
     const columns = selectedType ? columnsMap.get(selectedType) : [];
@@ -307,10 +484,14 @@ export default class QueryIndex extends React.Component<
         healthColor = Health.yellow;
         break;
     }
+    let modalVisibal = false;
+    if (selectedRcdText) {
+      modalVisibal = true;
+    }
     return (
       <>
         <Collapse>
-          <Panel header={`索引：${index}`} key="1">
+          <Panel header={`索引：${index}`} key="1" extra={this.extraContext()}>
             <Descriptions size="small">
               <Descriptions.Item label="Total Docs">
                 {indexBrief?.docsCount}
@@ -325,13 +506,26 @@ export default class QueryIndex extends React.Component<
               <Descriptions.Item label="Total Size">
                 {indexBrief?.storeSize}
               </Descriptions.Item>
+              <Descriptions.Item label="Reponstry">
+                {indexBrief?.rep}
+              </Descriptions.Item>
+              <Descriptions.Item label="Status">
+                {indexBrief?.status}
+              </Descriptions.Item>
+              <Descriptions.Item label="Uuid">
+                {indexBrief?.uuid}
+              </Descriptions.Item>
             </Descriptions>
           </Panel>
         </Collapse>
         <Divider />
         <Row>
           <Form layout="inline" initialValues={searchParam} ref={this.formRef}>
-            <Form.Item label="当前类型" name="selectedType">
+            <Form.Item
+              label="当前类型"
+              name="selectedType"
+              style={{ minWidth: '200px' }}
+            >
               <Select value={types[0] || selectedType}>
                 {types.map((t) => {
                   return (
@@ -378,6 +572,31 @@ export default class QueryIndex extends React.Component<
             }}
           />
         </Row>
+        <Modal
+          visible={modalVisibal}
+          title={`数据详细:${selectedRcd && selectedRcd.key}`}
+          footer={this.modalFooter()}
+          width={700}
+          closable
+          onCancel={this.unselectedRecord}
+        >
+          <textarea
+            style={{ width: '100%' }}
+            rows={30}
+            value={selectedRcdText}
+            onChange={(evt: React.ChangeEvent) => {
+              console.log(evt.target.value);
+              this.setState({
+                selectedRcdText: evt.target.value,
+              });
+              // try{
+              //   JSON.parse();
+              // } catch (err) {
+
+              // }
+            }}
+          />
+        </Modal>
       </>
     );
   };

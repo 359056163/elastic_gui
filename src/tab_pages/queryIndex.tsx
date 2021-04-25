@@ -183,7 +183,7 @@ export default class QueryIndex extends React.Component<
     try {
       queryContext = JSON.parse(query);
     } catch (e) {
-      console.log('错误的json 格式：', query);
+      console.error('错误的json 格式：', query);
       message.error(e.message);
     }
 

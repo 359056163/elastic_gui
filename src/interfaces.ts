@@ -30,3 +30,10 @@ export enum Health {
   yellow = '#FFCC00',
   red = '#FF0000',
 }
+
+export interface ElasticResult<T> {
+  current: number;
+  pageSize: number;
+  total: number;
+  data: T[];
+}

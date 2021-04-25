@@ -17,10 +17,8 @@ import {
   Descriptions,
   Space,
 } from 'antd';
-import { ApiResponse, Client } from '@elastic/elasticsearch';
+import { Client } from '@elastic/elasticsearch';
 import { ColumnsType } from 'antd/es/table';
-import { Search } from '@elastic/elasticsearch/api/requestParams';
-import { observer } from 'mobx-react';
 import {
   SearchOutlined,
   AlertOutlined,
@@ -30,7 +28,9 @@ import {
   DeleteOutlined,
   FormOutlined,
 } from '@ant-design/icons';
+import { observer } from 'mobx-react';
 import { ElasticIndexBrief, Health } from '../interfaces';
+import QueryIndexStore from './queryIndexStore';
 
 const { Option } = Select;
 const { Panel } = Collapse;
@@ -38,19 +38,11 @@ export interface IQueryIndexProps {
   client: Client;
   index: string;
 }
-// interface SearchParam {
-//   type: string;
-//   query: {
-//     must: any[];
-//     must_not: any[];
-//     should: any[];
-//   };
-// }
 
 interface IQueryIndexState {
   types: string[];
   data: any[];
-  columnsMap: Map<string, ColumnsType<any>>;
+  columnsMap: Map<string, ColumnsType<any>>; // antd.table 不同type的表头字段集合
   paginationParam: TablePaginationConfig;
   dataLoading: boolean;
   searchParam: {
@@ -62,54 +54,6 @@ interface IQueryIndexState {
   selectedRcdText?: string;
 }
 
-function getBrief(
-  client: Client,
-  index: string
-): Promise<ElasticIndexBrief | null> {
-  return client.cat
-    .indices({
-      format: 'json',
-      index,
-    })
-    .then((resp: ApiResponse) => {
-      const row = resp.body[0];
-      if (resp.statusCode === 200) {
-        if (row) {
-          const info: ElasticIndexBrief = {
-            docsCount: row['docs.count'],
-            docsDeleted: row['docs.delete'],
-            health: row.health,
-            index: row.index,
-            pri: row.pri,
-            priStoreSize: row['pri.store.size'],
-            rep: row.rep,
-            status: row.status,
-            storeSize: row['store.size'],
-            uuid: row.uuid,
-          };
-          return info;
-        }
-        return null;
-      }
-      const err: Error = new Error(`HTTP STATUS:${resp.statusCode}
-      HTTP BODY:${resp.body}`);
-      throw err;
-    });
-}
-
-async function getIndexState(client: Client, index: string): Promise<any> {
-  const stateResp = await client.indices.stats({
-    index,
-  });
-  return stateResp.body;
-}
-async function getIndexInfo(client: Client, index: string): Promise<any> {
-  const infoResp = await client.cluster.state({
-    index,
-    metric: 'metadata',
-  });
-  return infoResp.body;
-}
 @observer
 export default class QueryIndex extends React.Component<
   IQueryIndexProps,
@@ -117,8 +61,12 @@ export default class QueryIndex extends React.Component<
 > {
   formRef = React.createRef<FormInstance>();
 
+  store: QueryIndexStore;
+
   constructor(props: IQueryIndexProps) {
     super(props);
+    const { client, index } = props;
+    this.store = new QueryIndexStore(client, index);
     this.state = {
       types: [],
       data: [],
@@ -150,10 +98,9 @@ export default class QueryIndex extends React.Component<
   }
 
   componentDidMount = async () => {
-    const { client, index } = this.props;
-    const resp = await client.indices.get({ index });
-    const brief = await getBrief(client, index);
-    const { mappings } = resp.body[index];
+    const indexInfo = await this.store.getIndexInfo();
+    const brief = await this.store.getIndexBrief();
+    const { mappings } = indexInfo;
     const types: string[] = [];
     const { columnsMap } = this.state;
     Object.keys(mappings).forEach((type: string) => {
@@ -204,14 +151,20 @@ export default class QueryIndex extends React.Component<
       columnsMap,
       indexBrief: brief,
     });
-    this.formRef.current?.resetFields();
+    this.formRef.current?.resetFields(); // 重制表单是因为表单绑定数据改变了。
     await this.requestData();
   };
 
-  private requestData = async () => {
+  // 切换dataloading 的状态
+  private toggleLoading = (flag?: boolean) => {
+    const { dataLoading } = this.state;
     this.setState({
-      dataLoading: true,
+      dataLoading: flag === undefined ? !dataLoading : flag,
     });
+  };
+
+  private requestData = async () => {
+    this.toggleLoading(true);
     const { paginationParam, searchParam } = this.state;
     const { selectedType, query } = searchParam;
     let { current, pageSize } = paginationParam;
@@ -221,6 +174,11 @@ export default class QueryIndex extends React.Component<
     if (pageSize === undefined) {
       pageSize = 100;
     }
+    if (!selectedType) {
+      message.warning('没有选择要查询的类型！');
+      return;
+    }
+
     let queryContext: any;
     try {
       queryContext = JSON.parse(query);
@@ -228,32 +186,20 @@ export default class QueryIndex extends React.Component<
       console.log('错误的json 格式：', query);
       message.error(e.message);
     }
-    const { client, index } = this.props;
-    const param: Search = {
-      index,
-      body: {
-        query: queryContext,
-      },
-      from: (current - 1) * pageSize,
-      size: pageSize,
-      type: selectedType,
-    };
+
     try {
-      const dataResp = await client.search(param);
-      const totalAmount = dataResp.body.hits.total;
-      const data = dataResp.body.hits.hits.map((row: any) => {
-        // eslint-disable-next-line no-underscore-dangle
-        const r = row._source;
-        // eslint-disable-next-line no-underscore-dangle
-        r.key = row._id;
-        return r;
-      });
+      const dataResult = await this.store.requestData(
+        selectedType,
+        current,
+        pageSize,
+        queryContext
+      );
 
       this.setState({
         dataLoading: false,
-        data,
+        data: dataResult.data,
         paginationParam: {
-          total: totalAmount,
+          total: dataResult.total,
         },
       });
     } catch (e) {
@@ -301,14 +247,14 @@ export default class QueryIndex extends React.Component<
   };
 
   extraContext = (): ReactNode => {
-    const { client, index } = this.props;
+    const { index } = this.props;
     return (
       <Space size="small">
         <RadarChartOutlined
           title="索引状态"
           onClick={async (evt: React.MouseEvent) => {
             evt.stopPropagation();
-            const state = await getIndexState(client, index);
+            const state = await this.store.getIndexState();
             Modal.info({
               title: `索引：${index} 的状态`,
               content: <pre>{JSON.stringify(state, null, 2)}</pre>,
@@ -321,9 +267,9 @@ export default class QueryIndex extends React.Component<
           title="索引信息"
           onClick={async (evt: React.MouseEvent) => {
             evt.stopPropagation();
-            const inf = await getIndexInfo(client, index);
+            const inf = await this.store.getIndexInfo();
             Modal.info({
-              title: `索引：${index} 的状态`,
+              title: `索引：${index} 的信息`,
               content: <pre>{JSON.stringify(inf, null, 2)}</pre>,
               width: '500',
               closable: true,
@@ -334,6 +280,7 @@ export default class QueryIndex extends React.Component<
     );
   };
 
+  // 取消选中的记录，modal隐藏
   unselectedRecord = () => {
     this.setState({
       selectedRcd: undefined,
@@ -341,51 +288,40 @@ export default class QueryIndex extends React.Component<
     });
   };
 
+  // 删除单条记录
   deleteSelectedRcd = async () => {
     const {
       selectedRcd,
       searchParam: { selectedType },
     } = this.state;
-    const { client, index } = this.props;
+    if (!selectedType) {
+      message.warning('没有选择要查询的类型！');
+      return;
+    }
     if (selectedRcd && selectedRcd.key && selectedType) {
-      this.setState({
-        dataLoading: true,
-      });
+      this.toggleLoading();
       const { key } = selectedRcd;
-      const resp = await client.delete({
-        id: key,
-        index,
-        type: selectedType,
-      });
-      if (resp && resp.statusCode === 200 && resp.body.result === 'deleted') {
-        this.setState({
-          dataLoading: false,
-          selectedRcd: undefined,
-          selectedRcdText: undefined,
-        });
+      try {
+        await this.store.deleteRecord(key, selectedType);
+        this.unselectedRecord();
         await this.requestData();
-      } else {
-        this.setState({
-          dataLoading: false,
-        });
-        message.error(
-          `http code: ${resp.statusCode}, err: ${JSON.stringify(resp.body)}`
-        );
+      } catch (e) {
+        message.error(e.message);
+      } finally {
+        this.toggleLoading(false);
       }
     }
   };
 
+  // 修改单条记录
   modifyRcd = async () => {
     const {
       selectedRcd,
       selectedRcdText,
       searchParam: { selectedType },
     } = this.state;
-    const { client, index } = this.props;
     if (selectedRcd && selectedRcd.key && selectedType && selectedRcdText) {
-      this.setState({
-        dataLoading: true,
-      });
+      this.toggleLoading(true);
       const { key } = selectedRcd;
       let modifiedRcd = null;
       try {
@@ -395,31 +331,18 @@ export default class QueryIndex extends React.Component<
         return;
       }
       try {
-        const resp = await client.update({
-          id: key,
-          index,
-          type: selectedType,
-          body: {
-            doc: modifiedRcd,
-          },
+        await this.store.updateRecord(key, selectedType, modifiedRcd);
+
+        this.setState({
+          selectedRcd: undefined,
+          selectedRcdText: undefined,
         });
-        if (resp && resp.statusCode === 200 && resp.body.result === 'updated') {
-          this.setState({
-            dataLoading: false,
-            selectedRcd: undefined,
-            selectedRcdText: undefined,
-          });
-          await this.requestData();
-        } else {
-          this.setState({
-            dataLoading: false,
-          });
-          message.error(
-            `http code: ${resp.statusCode}, err: ${JSON.stringify(resp.body)}`
-          );
-        }
+
+        await this.requestData();
       } catch (e) {
         message.error(e.message);
+      } finally {
+        this.toggleLoading(false);
       }
     }
   };
@@ -495,7 +418,9 @@ export default class QueryIndex extends React.Component<
             <Descriptions size="small">
               <Descriptions.Item label="Total Docs">
                 {indexBrief?.docsCount}
-                {indexBrief?.docsDeleted ? `(${indexBrief?.docsDeleted})` : ''}
+              </Descriptions.Item>
+              <Descriptions.Item label="Deleted Docs">
+                {indexBrief?.docsDeleted}
               </Descriptions.Item>
               <Descriptions.Item label="Index Health">
                 <Tag color={healthColor}>
@@ -506,11 +431,17 @@ export default class QueryIndex extends React.Component<
               <Descriptions.Item label="Total Size">
                 {indexBrief?.storeSize}
               </Descriptions.Item>
-              <Descriptions.Item label="Reponstry">
-                {indexBrief?.rep}
+              <Descriptions.Item label="Primary Size">
+                {indexBrief?.priStoreSize}
               </Descriptions.Item>
               <Descriptions.Item label="Status">
                 {indexBrief?.status}
+              </Descriptions.Item>
+              <Descriptions.Item label="Primary Shards">
+                {indexBrief?.pri}
+              </Descriptions.Item>
+              <Descriptions.Item label="Replica Shards">
+                {indexBrief?.rep}
               </Descriptions.Item>
               <Descriptions.Item label="Uuid">
                 {indexBrief?.uuid}
@@ -584,16 +515,10 @@ export default class QueryIndex extends React.Component<
             style={{ width: '100%' }}
             rows={30}
             value={selectedRcdText}
-            onChange={(evt: React.ChangeEvent) => {
-              console.log(evt.target.value);
+            onChange={(evt: React.ChangeEvent<HTMLTextAreaElement>) => {
               this.setState({
                 selectedRcdText: evt.target.value,
               });
-              // try{
-              //   JSON.parse();
-              // } catch (err) {
-
-              // }
             }}
           />
         </Modal>

@@ -1,7 +1,6 @@
-import { makeAutoObservable, observable } from 'mobx';
-import { URL } from 'url';
+import { makeAutoObservable } from 'mobx';
 import { message } from 'antd';
-import { Client, ClientOptions } from '@elastic/elasticsearch';
+import { Client } from '@elastic/elasticsearch';
 import { IMainTabProp, ElasticConn } from './interfaces';
 
 const { ipcRenderer } = window.require('electron');

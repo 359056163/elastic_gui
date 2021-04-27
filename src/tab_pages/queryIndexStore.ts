@@ -2,6 +2,7 @@ import { makeAutoObservable } from 'mobx';
 import { Client, ApiResponse } from '@elastic/elasticsearch';
 import { Search } from '@elastic/elasticsearch/api/requestParams';
 import { ElasticIndexBrief, ElasticResult } from '../interfaces';
+import { loadPartialConfig } from '@babel/core';
 
 // 只是单纯的将数据层的操作提取，界面状态仍旧维护在组建的state中。
 export default class QueryIndexStore {
@@ -150,5 +151,109 @@ export default class QueryIndexStore {
       total: totalAmount,
       data,
     };
+  };
+
+  // todo - 补齐这2个空白方法
+  deleteAllRecord = async (type: string, query: any) => {
+    const { client, index } = this;
+    const resp = await client.deleteByQuery({
+      index,
+      type,
+      body: {
+        query,
+      },
+    });
+    console.log(resp);
+    if (resp && resp.statusCode === 200) {
+      return;
+    }
+    throw new Error(
+      `http code: ${resp.statusCode}, err: ${JSON.stringify(resp.body)}`
+    );
+  };
+
+  deleteBulk = async (type: string, ids: string[]) => {
+    if (ids.length <= 0) {
+      return;
+    }
+    const { client, index } = this;
+    const resp = await client.bulk({
+      index,
+      type,
+      body: ids.map((id) => {
+        return {
+          delete: {
+            _id: id,
+          },
+        };
+      }),
+    });
+
+    if (resp && resp.statusCode === 200 && !resp.body.errors) {
+      return;
+    }
+    const errors = resp.body.items.filter((item: any) => {
+      return !(item.found && item.result === 'deleted');
+    });
+    if (errors.length > 0) {
+      throw new Error(JSON.stringify(errors, null, 2));
+    }
+    throw new Error(
+      `http code: ${resp.statusCode}, err: ${JSON.stringify(resp.body)}`
+    );
+  };
+
+  updateAllRecord = async (type: string, query: any, partial: any) => {
+    const { client, index } = this;
+    const resp = await client.updateByQuery({
+      index,
+      type,
+      body: {
+        query,
+        doc: partial,
+      },
+    });
+    console.log(resp);
+    if (resp && resp.statusCode === 200 && resp.body.result === 'updated') {
+      return;
+    }
+
+    throw new Error(
+      `http code: ${resp.statusCode}, err: ${JSON.stringify(resp.body)}`
+    );
+  };
+
+  updateBulk = async (type: string, ids: string[], partial: any) => {
+    if (ids.length <= 0) {
+      return;
+    }
+    const { client, index } = this;
+    const resp = await client.bulk({
+      index,
+      type,
+      body: ids.map((id) => {
+        return {
+          update: {
+            _id: id,
+            body: {
+              doc: partial,
+            },
+          },
+        };
+      }),
+    });
+
+    if (resp && resp.statusCode === 200 && !resp.body.errors) {
+      return;
+    }
+    const errors = resp.body.items.filter((item: any) => {
+      return !(item.found && item.result === 'updated');
+    });
+    if (errors.length > 0) {
+      throw new Error(JSON.stringify(errors, null, 2));
+    }
+    throw new Error(
+      `http code: ${resp.statusCode}, err: ${JSON.stringify(resp.body)}`
+    );
   };
 }

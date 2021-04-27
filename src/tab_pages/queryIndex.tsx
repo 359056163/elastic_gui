@@ -13,24 +13,28 @@ import {
   Divider,
   message,
   Button,
+  Menu,
+  Dropdown,
   Collapse,
-  Descriptions,
   Space,
+  Alert,
 } from 'antd';
 import { Client } from '@elastic/elasticsearch';
 import { ColumnsType } from 'antd/es/table';
 import {
   SearchOutlined,
-  AlertOutlined,
   SettingOutlined,
   RadarChartOutlined,
   CloseCircleOutlined,
   DeleteOutlined,
   FormOutlined,
+  SaveOutlined,
 } from '@ant-design/icons';
 import { observer } from 'mobx-react';
-import { ElasticIndexBrief, Health } from '../interfaces';
+import { ElasticIndexBrief } from '../interfaces';
 import QueryIndexStore from './queryIndexStore';
+import { IndexBrief } from './indexBrief';
+import { Updator } from './updator';
 
 const { Option } = Select;
 const { Panel } = Collapse;
@@ -52,6 +56,8 @@ interface IQueryIndexState {
   indexBrief: ElasticIndexBrief | null;
   selectedRcd?: any;
   selectedRcdText?: string;
+  selectedRcdKeys: string[];
+  updatorModalVisible: boolean;
 }
 
 @observer
@@ -68,6 +74,8 @@ export default class QueryIndex extends React.Component<
     const { client, index } = props;
     this.store = new QueryIndexStore(client, index);
     this.state = {
+      updatorModalVisible: false,
+      selectedRcdKeys: [],
       types: [],
       data: [],
       columnsMap: new Map(),
@@ -376,6 +384,54 @@ export default class QueryIndex extends React.Component<
     );
   };
 
+  deleteAll = async () => {
+    const { selectedRcdKeys, searchParam } = this.state;
+    const { selectedType, query } = searchParam;
+    if (!selectedType) {
+      message.warning('没有选择要查询的类型！');
+      return;
+    }
+    this.toggleLoading(true);
+    if (selectedRcdKeys && selectedRcdKeys.length > 0) {
+      await this.store.deleteBulk(selectedType, selectedRcdKeys);
+    } else {
+      let queryContext: any;
+      try {
+        queryContext = JSON.parse(query);
+      } catch (e) {
+        console.error('错误的json 格式：', query);
+        message.error(e.message);
+      }
+      await this.store.deleteAllRecord(selectedType, queryContext);
+    }
+
+    await this.requestData();
+  };
+
+  updateAll = async (update: any) => {
+    const { selectedRcdKeys, searchParam } = this.state;
+    const { selectedType, query } = searchParam;
+    if (!selectedType) {
+      message.warning('没有选择要查询的类型！');
+      return;
+    }
+    this.toggleLoading(true);
+    if (selectedRcdKeys && selectedRcdKeys.length > 0) {
+      await this.store.updateBulk(selectedType, selectedRcdKeys, update);
+    } else {
+      let queryContext: any;
+      try {
+        queryContext = JSON.parse(query);
+      } catch (e) {
+        console.error('错误的json 格式：', query);
+        message.error(e.message);
+      }
+      await this.store.updateAllRecord(selectedType, queryContext, update);
+    }
+
+    await this.requestData();
+  };
+
   render = () => {
     const {
       data,
@@ -387,66 +443,26 @@ export default class QueryIndex extends React.Component<
       indexBrief,
       selectedRcd,
       selectedRcdText,
+      selectedRcdKeys,
+      updatorModalVisible,
     } = this.state;
     const { selectedType } = searchParam;
     const columns = selectedType ? columnsMap.get(selectedType) : [];
     const { index } = this.props;
-    let healthColor: string;
-    // console.log('healthColor:',healthColor);
-    switch (indexBrief?.health) {
-      case 'yellow':
-        healthColor = Health.yellow;
-        break;
-      case 'green':
-        healthColor = Health.green;
-        break;
-      case 'red':
-        healthColor = Health.red;
-        break;
-      default:
-        healthColor = Health.yellow;
-        break;
-    }
     let modalVisibal = false;
     if (selectedRcdText) {
       modalVisibal = true;
     }
+    const fields: string[] = [];
+    columns?.forEach((col: any) => {
+      fields.push(col.key);
+    });
+    // todo 查询参数组件化
     return (
       <>
         <Collapse>
           <Panel header={`索引：${index}`} key="1" extra={this.extraContext()}>
-            <Descriptions size="small">
-              <Descriptions.Item label="Total Docs">
-                {indexBrief?.docsCount}
-              </Descriptions.Item>
-              <Descriptions.Item label="Deleted Docs">
-                {indexBrief?.docsDeleted}
-              </Descriptions.Item>
-              <Descriptions.Item label="Index Health">
-                <Tag color={healthColor}>
-                  <AlertOutlined />
-                  {indexBrief?.health}
-                </Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label="Total Size">
-                {indexBrief?.storeSize}
-              </Descriptions.Item>
-              <Descriptions.Item label="Primary Size">
-                {indexBrief?.priStoreSize}
-              </Descriptions.Item>
-              <Descriptions.Item label="Status">
-                {indexBrief?.status}
-              </Descriptions.Item>
-              <Descriptions.Item label="Primary Shards">
-                {indexBrief?.pri}
-              </Descriptions.Item>
-              <Descriptions.Item label="Replica Shards">
-                {indexBrief?.rep}
-              </Descriptions.Item>
-              <Descriptions.Item label="Uuid">
-                {indexBrief?.uuid}
-              </Descriptions.Item>
-            </Descriptions>
+            <IndexBrief brief={indexBrief} />
           </Panel>
         </Collapse>
         <Divider />
@@ -471,20 +487,60 @@ export default class QueryIndex extends React.Component<
               <Input.TextArea autoSize />
             </Form.Item>
             <Form.Item>
-              <Button
+              <Dropdown.Button
                 type="primary"
                 onClick={this.onSearchButtonClick}
-                loading={dataLoading}
+                disabled={dataLoading}
+                overlay={
+                  <Menu>
+                    <Menu.Item
+                      onClick={() => {
+                        this.deleteAll();
+                      }}
+                    >
+                      <DeleteOutlined />
+                      全部删除
+                    </Menu.Item>
+                    <Menu.Item
+                      onClick={() => {
+                        this.setState({
+                          updatorModalVisible: true,
+                        });
+                      }}
+                    >
+                      <SaveOutlined />
+                      全部更新
+                    </Menu.Item>
+                  </Menu>
+                }
               >
                 <SearchOutlined />
                 检索
-              </Button>
+              </Dropdown.Button>
             </Form.Item>
           </Form>
         </Row>
         <Divider />
+        {selectedRcdKeys && selectedRcdKeys.length > 0 ? (
+          <Alert
+            type="warning"
+            message="全部删除与全部更新，将针对被选中的记录"
+          />
+        ) : (
+          <></>
+        )}
         <Row style={{ overflow: 'scroll', backgroundColor: '#ffffff' }}>
           <Table
+            rowSelection={{
+              onChange: (keys: React.Key[]) => {
+                this.setState({
+                  selectedRcdKeys: keys.map((k) => {
+                    return k.toString();
+                  }),
+                });
+              },
+              selectedRowKeys: selectedRcdKeys,
+            }}
             loading={dataLoading}
             bordered
             dataSource={data}
@@ -522,6 +578,22 @@ export default class QueryIndex extends React.Component<
             }}
           />
         </Modal>
+        <Updator
+          visible={updatorModalVisible}
+          fields={fields}
+          onOk={(updator: any) => {
+            console.log(updator);
+            this.setState({
+              updatorModalVisible: false,
+            });
+            this.updateAll(updator);
+          }}
+          onCancel={() => {
+            this.setState({
+              updatorModalVisible: false,
+            });
+          }}
+        />
       </>
     );
   };

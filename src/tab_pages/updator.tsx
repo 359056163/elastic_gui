@@ -12,7 +12,7 @@ export interface IUpdatorProps {
   onCancel(): void;
 }
 
-interface SelecteValidation {
+interface SelectedValidation {
   validateStatus: '' | 'success' | 'error' | 'validating' | 'warning';
   help: string;
 }
@@ -22,7 +22,7 @@ export function Updator(props: IUpdatorProps) {
   const [selectedField, setSelectedField] = useState<string>(fields[0]);
   const [selectedFields, setSelectedFields] = useState<string[]>([]);
   const [form] = Form.useForm();
-  const [validation, setValidation] = useState<SelecteValidation>({
+  const [validation, setValidation] = useState<SelectedValidation>({
     validateStatus: '',
     help: '',
   });
@@ -90,14 +90,19 @@ export function Updator(props: IUpdatorProps) {
                     setValidation(validation);
                     setSelectedField(value);
                   }}
+                  disabled={selectedFields.length === fields.length}
                 >
-                  {fields.map((field) => {
-                    return (
-                      <Option key={field} value={field}>
-                        {field}
-                      </Option>
-                    );
-                  })}
+                  {fields
+                    .filter((field) => {
+                      return !selectedFields.find((f) => f === field);
+                    })
+                    .map((field) => {
+                      return (
+                        <Option key={field} value={field}>
+                          {field}
+                        </Option>
+                      );
+                    })}
                 </Select>
               </Form.Item>
               <Form.Item>
@@ -119,6 +124,7 @@ export function Updator(props: IUpdatorProps) {
                   }}
                   block
                   icon={<PlusOutlined />}
+                  disabled={selectedFields.length === fields.length}
                 >
                   添加
                 </Button>

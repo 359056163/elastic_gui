@@ -24,6 +24,7 @@ export interface ElasticIndexBrief {
   status: string;
   storeSize: string;
   uuid: string;
+  aliases?: string[];
 }
 export enum Health {
   green = '#336600',

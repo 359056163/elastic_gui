@@ -53,7 +53,7 @@ export class AppStore {
   addTab = (
     conn: ElasticConn,
     client: Client,
-    operation: string,
+    operation: 'query' | 'overview',
     index: string
   ) => {
     const key = `Tab:${index}:${operation}`;

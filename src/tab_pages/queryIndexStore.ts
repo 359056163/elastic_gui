@@ -2,7 +2,6 @@ import { makeAutoObservable } from 'mobx';
 import { Client, ApiResponse } from '@elastic/elasticsearch';
 import { Search } from '@elastic/elasticsearch/api/requestParams';
 import { ElasticIndexBrief, ElasticResult } from '../interfaces';
-import { loadPartialConfig } from '@babel/core';
 
 // 只是单纯的将数据层的操作提取，界面状态仍旧维护在组建的state中。
 export default class QueryIndexStore {

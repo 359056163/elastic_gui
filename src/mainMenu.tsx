@@ -101,6 +101,12 @@ export class MainMenu extends React.Component<IMainMenuProp, IMainMenuState> {
     store.addTab(connection, client, 'query', index);
   };
 
+  onOverviewSelected = (item: SubMenuItemInfo) => {
+    const { store } = this.props;
+    const { client, connection } = item;
+    store.addTab(connection, client, 'overview', '');
+  };
+
   render = () => {
     // const { store } = this.props;
     const { loading, items } = this.state;
@@ -117,7 +123,14 @@ export class MainMenu extends React.Component<IMainMenuProp, IMainMenuState> {
                   await this.onSubClick(e, index);
                 }}
               >
-                <Item key={`Item:${alias + host}:overview`}>节点概要</Item>
+                <Item
+                  key={`Item:${alias + host}:overview`}
+                  onClick={() => {
+                    this.onOverviewSelected(e);
+                  }}
+                >
+                  节点概要
+                </Item>
                 {e.indices.map((idx) => {
                   return (
                     <Item

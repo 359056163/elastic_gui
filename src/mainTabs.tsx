@@ -63,7 +63,7 @@ export default class MainTabs extends React.Component<IMainTabsProp, any> {
             case 'overview':
               return (
                 <TabPane tab={`${alias}概览`} key={key} closable>
-                  <Overview config={connection} />
+                  <Overview config={connection} client={client} />
                 </TabPane>
               );
             case 'query':

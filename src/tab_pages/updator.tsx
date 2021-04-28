@@ -17,6 +17,11 @@ interface SelectedValidation {
   help: string;
 }
 
+/**
+ * queryIndex页获取要更新的doc类型属性 对象
+ * @param props 属性
+ * @returns
+ */
 export function Updator(props: IUpdatorProps) {
   const { visible, fields, onOk, onCancel } = props;
   const [selectedField, setSelectedField] = useState<string>(fields[0]);

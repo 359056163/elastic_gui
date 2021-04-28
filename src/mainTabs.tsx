@@ -6,6 +6,7 @@ import { IMainTabProp } from './interfaces';
 import Overview from './tab_pages/overview';
 import QueryIndex from './tab_pages/queryIndex';
 import { AppStore } from './elastic.store';
+import OverviewStore from './tab_pages/overviewStore';
 
 const { TabPane } = Tabs;
 
@@ -37,7 +38,6 @@ export default class MainTabs extends React.Component<IMainTabsProp, any> {
       | React.KeyboardEvent<Element>,
     action: string
   ) => {
-    console.log(evt, action);
     const { store } = this.props;
     if (action === 'remove') {
       store.removeTab(evt.toString());
@@ -57,13 +57,17 @@ export default class MainTabs extends React.Component<IMainTabsProp, any> {
       >
         {tabs.map((tab: IMainTabProp) => {
           const { connection, operation, key, client, index } = tab;
-          const { alias, host } = connection;
+          const { alias } = connection;
 
           switch (operation) {
             case 'overview':
               return (
                 <TabPane tab={`${alias}概览`} key={key} closable>
-                  <Overview config={connection} client={client} />
+                  <Overview
+                    config={connection}
+                    client={client}
+                    store={new OverviewStore(client)}
+                  />
                 </TabPane>
               );
             case 'query':

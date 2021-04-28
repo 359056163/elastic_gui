@@ -1,4 +1,4 @@
-import { makeAutoObservable } from 'mobx';
+import { makeObservable, runInAction } from 'mobx';
 import { Client, ApiResponse } from '@elastic/elasticsearch';
 import { ElasticIndexBrief, ElasticResult } from '../interfaces';
 
@@ -22,12 +22,21 @@ export default class OverviewStore {
 
   info: InstanceInfo | null;
 
+  totalDocs = 0;
+
+  totalSize = 0;
+
+  deletedDocs = 0;
+
+  segmentCount = 0;
+
   constructor(client: Client) {
-    this.client = client;
-    this.info = null;
-    makeAutoObservable(this, {
+    makeObservable(this, {
       client: false,
     });
+
+    this.client = client;
+    this.info = null;
   }
 
   getAllIndexBrief = async () => {
@@ -40,7 +49,7 @@ export default class OverviewStore {
         format: 'json',
       }),
     ]);
-    // console.log(briefResp, aliasResp);
+
     this.indices = briefResp.body.map((row: any) => {
       const { index } = row;
       const aliases = aliasResp.body
@@ -68,10 +77,29 @@ export default class OverviewStore {
   getInstanceInfo = async () => {
     const { client } = this;
     const resp = await client.info();
-    const respC = await client.cat.count({ format: 'json' });
-    console.log(respC);
     if (resp.statusCode === 200) {
       this.info = resp.body;
+      return;
+    }
+    throw new Error(
+      `HTTP CODE:${resp.statusCode}, msg:${JSON.stringify(resp.body)}`
+    );
+  };
+
+  getInstanceStatus = async () => {
+    const { client } = this;
+    const resp = await client.indices.stats();
+    if (resp.statusCode === 200) {
+      const { body: data } = resp;
+      const {
+        _all: { total },
+      } = data;
+      runInAction(() => {
+        this.totalDocs = total.docs.count;
+        this.deletedDocs = total.docs.deleted;
+        this.totalSize = total.store.size_in_bytes;
+        this.segmentCount = total.segments.count;
+      });
       return;
     }
     throw new Error(
